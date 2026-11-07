@@ -2,8 +2,8 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 
 use anyhow::anyhow;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use bytes::Bytes;
 use get_if_addrs::get_if_addrs;
 use hkdf::Hkdf;
@@ -141,6 +141,89 @@ pub fn encode_point(unsigned: Bytes) -> Result<Vec<u8>, anyhow::Error> {
         .ok_or_else(|| anyhow!("Failed to convert to bigint"))?;
 
     Ok(big_int.to_signed_bytes_be())
+}
+
+/// Normalises one P-256 affine coordinate to the fixed 32 bytes that SEC1 wants.
+///
+/// `EcP256PublicKey` carries x and y as big-endian **two's complement** integers
+/// (securemessage.proto says so explicitly), so their length varies with the
+/// value: a leading 0x00 is prepended when the top bit is set, giving 33 bytes,
+/// and leading zero bytes are stripped otherwise, giving 31 or fewer. Both are
+/// valid on the wire.
+///
+/// An uncompressed SEC1 point is fixed-width — `0x04 || x[32] || y[32]` — so a
+/// short coordinate has to be left-padded, not appended raw. Appending raw
+/// yields a 63- or 64-byte buffer and `EncodedPoint::from_bytes` fails with
+/// "elliptic curve point encoding error". A P-256 coordinate encodes short
+/// roughly once in 512, so this bites about 1 connection in 262.
+pub fn p256_coordinate(coordinate: &[u8]) -> [u8; 32] {
+    let mut padded = [0u8; 32];
+
+    // Over-long input carries a sign byte (or more); keep the low 32 bytes.
+    let significant = if coordinate.len() > 32 {
+        &coordinate[coordinate.len() - 32..]
+    } else {
+        coordinate
+    };
+
+    // Right-align, so missing leading bytes stay zero.
+    padded[32 - significant.len()..].copy_from_slice(significant);
+    padded
+}
+
+#[cfg(test)]
+mod coordinate_tests {
+    use super::*;
+
+    #[test]
+    fn pads_a_short_coordinate_on_the_left() {
+        // 31 bytes, as produced when the value is below 2^247.
+        let short = [0xAAu8; 31];
+        let padded = p256_coordinate(&short);
+
+        assert_eq!(padded.len(), 32);
+        assert_eq!(padded[0], 0x00, "the pad must go on the left");
+        assert_eq!(&padded[1..], &short[..]);
+    }
+
+    #[test]
+    fn strips_a_two_s_complement_sign_byte() {
+        // 33 bytes: a 0x00 prepended because the top bit of the value is set.
+        let mut signed = vec![0x00u8];
+        signed.extend_from_slice(&[0xFFu8; 32]);
+
+        assert_eq!(p256_coordinate(&signed), [0xFFu8; 32]);
+    }
+
+    #[test]
+    fn leaves_an_exact_coordinate_alone() {
+        let exact = [0x42u8; 32];
+        assert_eq!(p256_coordinate(&exact), exact);
+    }
+
+    #[test]
+    fn an_empty_coordinate_is_all_zeroes() {
+        // Not a valid key, but it must not panic on the slice arithmetic.
+        assert_eq!(p256_coordinate(&[]), [0u8; 32]);
+    }
+
+    #[test]
+    fn every_length_yields_a_usable_sec1_point() {
+        // The property that actually matters: whatever arrives on the wire, the
+        // rebuilt buffer is always 65 bytes.
+        for len in 0..=40usize {
+            let coordinate = vec![0x5Au8; len];
+            let mut point = vec![0x04];
+            point.extend_from_slice(&p256_coordinate(&coordinate));
+            point.extend_from_slice(&p256_coordinate(&coordinate));
+            assert_eq!(
+                point.len(),
+                65,
+                "length {len} produced {} bytes",
+                point.len()
+            );
+        }
+    }
 }
 
 pub fn hkdf_extract_expand(

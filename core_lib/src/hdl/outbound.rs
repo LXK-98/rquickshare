@@ -1007,17 +1007,11 @@ impl OutboundRequest {
             .ok_or_else(|| anyhow!("Missing required fields"))?;
 
         let mut bytes = vec![0x04];
-        // Ensure no more than 32 bytes for the keys
-        if peer_p256_key.x.len() > 32 {
-            bytes.extend_from_slice(&peer_p256_key.x[peer_p256_key.x.len() - 32..]);
-        } else {
-            bytes.extend_from_slice(&peer_p256_key.x);
-        }
-        if peer_p256_key.y.len() > 32 {
-            bytes.extend_from_slice(&peer_p256_key.y[peer_p256_key.y.len() - 32..]);
-        } else {
-            bytes.extend_from_slice(&peer_p256_key.y);
-        }
+        // Exactly 32 bytes per coordinate: the wire format is variable-length
+        // two's complement, so short values need left-padding and over-long
+        // ones need their sign byte dropped. See utils::p256_coordinate.
+        bytes.extend_from_slice(&crate::utils::p256_coordinate(&peer_p256_key.x));
+        bytes.extend_from_slice(&crate::utils::p256_coordinate(&peer_p256_key.y));
 
         let encoded_point = EncodedPoint::from_bytes(bytes)?;
         let peer_key = PublicKey::from_encoded_point(&encoded_point).unwrap();
