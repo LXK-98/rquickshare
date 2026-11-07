@@ -14,8 +14,9 @@ use prost::Message;
 use rand::Rng;
 use sha2::{Digest, Sha256, Sha512};
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::sync::broadcast::{Receiver, Sender};
+
+use crate::transport::Transport;
 
 use super::{InnerState, TransferState};
 use crate::channel::{self, ChannelMessage, MessageClient, TransferAction, TransferKind};
@@ -48,15 +49,15 @@ const SANE_FRAME_LENGTH: i32 = 5 * 1024 * 1024;
 const SANITY_DURATION: Duration = Duration::from_micros(10);
 
 #[derive(Debug)]
-pub struct InboundRequest {
-    socket: TcpStream,
+pub struct InboundRequest<S> {
+    socket: S,
     pub state: InnerState,
     sender: Sender<ChannelMessage>,
     receiver: Receiver<ChannelMessage>,
 }
 
-impl InboundRequest {
-    pub fn new(socket: TcpStream, id: String, sender: Sender<ChannelMessage>) -> Self {
+impl<S: Transport> InboundRequest<S> {
+    pub fn new(socket: S, id: String, sender: Sender<ChannelMessage>) -> Self {
         let receiver = sender.subscribe();
 
         Self {

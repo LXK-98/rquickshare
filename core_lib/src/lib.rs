@@ -24,6 +24,7 @@ use crate::manager::TcpServer;
 
 pub mod channel;
 pub mod errors;
+pub mod transport;
 pub mod hdl;
 pub mod manager;
 pub mod utils;

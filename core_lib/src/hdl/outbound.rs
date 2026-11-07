@@ -16,8 +16,9 @@ use prost::Message;
 use rand::Rng;
 use sha2::{Digest, Sha256, Sha512};
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
 use tokio::sync::broadcast::error::TryRecvError;
+
+use crate::transport::Transport;
 use tokio::sync::broadcast::{Receiver, Sender};
 
 use super::info::{InternalFileInfo, TransferMetadata, TransferPayload, TransferPayloadKind};
@@ -59,19 +60,19 @@ pub enum OutboundPayload {
 }
 
 #[derive(Debug)]
-pub struct OutboundRequest {
+pub struct OutboundRequest<S> {
     endpoint_id: [u8; 4],
-    socket: TcpStream,
+    socket: S,
     pub state: InnerState,
     sender: Sender<ChannelMessage>,
     receiver: Receiver<ChannelMessage>,
     payload: OutboundPayload,
 }
 
-impl OutboundRequest {
+impl<S: Transport> OutboundRequest<S> {
     pub fn new(
         endpoint_id: [u8; 4],
-        socket: TcpStream,
+        socket: S,
         id: String,
         sender: Sender<ChannelMessage>,
         payload: OutboundPayload,
