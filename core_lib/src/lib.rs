@@ -30,7 +30,7 @@ pub mod manager;
 pub mod utils;
 
 pub use hdl::{EndpointInfo, OutboundPayload, TransferState, Visibility};
-pub use manager::SendInfo;
+pub use manager::{SendInfo, Target};
 pub use utils::DeviceType;
 
 pub mod sharing_nearby {

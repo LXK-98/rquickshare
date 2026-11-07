@@ -11,12 +11,36 @@ use crate::utils::{is_not_self_ip, parse_mdns_endpoint_info};
 #[derive(Debug, Clone, Default)]
 pub struct EndpointInfo {
     pub fullname: String,
+    /// `"ip:port"`, and therefore an *address* rather than an identity.
+    ///
+    /// Kept for compatibility: it is what callers have always passed back as
+    /// `SendInfo::id`. Prefer [`EndpointInfo::endpoint_id`] to recognise the
+    /// same device again, since this changes whenever the address does.
     pub id: String,
+    /// The device's advertised endpoint id, from the first label of
+    /// [`EndpointInfo::fullname`].
+    ///
+    /// This is what Quick Share devices identify themselves by, and unlike
+    /// `id` it survives a device closing and reopening its share sheet —
+    /// measured across an open/close/reopen cycle, where both it and the
+    /// address were unchanged. It does change over longer periods and across
+    /// networks, so it suits recognising a device within a session rather than
+    /// being stored.
+    pub endpoint_id: Option<String>,
     pub name: Option<String>,
     pub ip: Option<String>,
     pub port: Option<String>,
     pub rtype: Option<DeviceType>,
     pub present: Option<bool>,
+}
+
+/// Pulls the endpoint id out of an mDNS fullname.
+///
+/// A fullname looks like `I0tDVjb8n14AAA._FC9F5ED42C8A._tcp.local.`, and the
+/// first label is the device's endpoint id.
+fn endpoint_id_from_fullname(fullname: &str) -> Option<String> {
+    let label = fullname.split('.').next()?;
+    (!label.is_empty()).then(|| label.to_owned())
 }
 
 pub struct MDnsDiscovery {
@@ -84,6 +108,7 @@ impl MDnsDiscovery {
                                     let fullname = info.get_fullname().to_string();
                                     if TcpStream::connect(&ip_port).await.is_ok() {
                                         let ei = EndpointInfo {
+                                            endpoint_id: endpoint_id_from_fullname(&fullname),
                                             fullname: fullname.clone(),
                                             id: ip_port,
                                             name: Some(dn),

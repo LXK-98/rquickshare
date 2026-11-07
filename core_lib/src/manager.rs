@@ -10,11 +10,25 @@ use crate::utils::RemoteDeviceInfo;
 
 const INNER_NAME: &str = "TcpServer";
 
+/// Where and how to reach a device for an outbound transfer.
+///
+/// Nearby Connections defines several mediums and uses the same frame format on
+/// all of them, so the only medium-specific thing about a transfer is how the
+/// byte pipe is obtained. Naming that as a variant keeps `connect` honest about
+/// which ones actually exist, rather than implying any address string will do.
+#[derive(Debug, Clone)]
+pub enum Target {
+    /// `Medium::WifiLan`: an `"ip:port"` to open a TCP connection to.
+    WifiLan { addr: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct SendInfo {
+    /// How the caller identifies this device. Opaque here, and echoed back as
+    /// the id on every event for this transfer.
     pub id: String,
     pub name: String,
-    pub addr: String,
+    pub target: Target,
     pub ob: OutboundPayload,
 }
 
@@ -119,8 +133,14 @@ impl TcpServer {
 
     /// To be called inside a separate task if we want to handle concurrency
     pub async fn connect(&self, ctk: CancellationToken, si: SendInfo) -> Result<(), anyhow::Error> {
-        debug!("{INNER_NAME}: Connecting to: {}", si.addr);
-        let socket = TcpStream::connect(si.addr.clone()).await?;
+        let transfer_id = si.id.clone();
+
+        let socket = match &si.target {
+            Target::WifiLan { addr } => {
+                debug!("{INNER_NAME}: connecting over Wi-Fi LAN to: {addr}");
+                TcpStream::connect(addr.clone()).await?
+            }
+        };
 
         let mut or = OutboundRequest::new(
             self.endpoint_id,
@@ -156,7 +176,14 @@ impl TcpServer {
 
                                 if or.state.state != TransferState::Finished && or.state.state != TransferState::Cancelled {
                                     let _ = self.sender.clone().send(ChannelMessage {
-                                        id: si.addr,
+                                        // The caller's id, matching every other
+                                        // event for this transfer. This used to
+                                        // report the address, which was the same
+                                        // string only while identity and address
+                                        // were the same thing -- a client would
+                                        // otherwise get a failure for an id it
+                                        // had never been given.
+                                        id: transfer_id,
                                         msg: channel::Message::Client(MessageClient {
                                             kind: TransferKind::Outbound,
                                             state: Some(TransferState::Disconnected),
