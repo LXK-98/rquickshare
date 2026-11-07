@@ -87,7 +87,17 @@ impl TcpServer {
                                                         }),
                                                     });
                                                 }
-                                                error!("{INNER_NAME}: error while handling client: {e} ({:?})", ir.state.state);
+
+                                                // Once the transfer has finished, the peer
+                                                // hanging up is how it ends -- typically
+                                                // surfacing here as "early eof". Logging that at
+                                                // ERROR puts an alarming line in the journal
+                                                // after every successful transfer.
+                                                if ir.state.state == TransferState::Finished {
+                                                    debug!("{INNER_NAME}: client closed the connection after finishing: {e}");
+                                                } else {
+                                                    error!("{INNER_NAME}: error while handling client: {e} ({:?})", ir.state.state);
+                                                }
                                                 break;
                                             }
                                         },
@@ -154,7 +164,14 @@ impl TcpServer {
                                         }),
                                     });
                                 }
-                                error!("{INNER_NAME}: error while handling client: {e} ({:?})", or.state.state);
+                                // See the matching note on the inbound path: a
+                                // peer hanging up after a finished transfer is
+                                // not an error.
+                                if or.state.state == TransferState::Finished {
+                                    debug!("{INNER_NAME}: peer closed the connection after finishing: {e}");
+                                } else {
+                                    error!("{INNER_NAME}: error while handling client: {e} ({:?})", or.state.state);
+                                }
                                 break;
                             }
                         }
