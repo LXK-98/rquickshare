@@ -760,6 +760,18 @@ impl OutboundRequest {
                         Some(i) => i,
                         None => {
                             info!("All files have been transferred");
+
+                            // Disconnect *before* announcing Finished. The
+                            // receiver treats a connection that vanishes
+                            // without a Disconnection frame as a failed
+                            // transfer, even having taken every byte -- and a
+                            // client told "Finished" reasonably tears its
+                            // service down at once, which raced this frame and
+                            // cost the transfer.
+                            if let Err(e) = self.disconnection().await {
+                                warn!("couldn't send the disconnection frame: {e}");
+                            }
+
                             self.update_state(
                                 |e| {
                                     e.state = TransferState::Finished;
@@ -767,7 +779,6 @@ impl OutboundRequest {
                                 true,
                             )
                             .await;
-                            self.disconnection().await?;
                             // Breaking instead of NotAnError to allow peacefull termination
                             break;
                         }
